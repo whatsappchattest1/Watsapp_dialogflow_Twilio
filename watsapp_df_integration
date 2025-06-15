@@ -1,0 +1,52 @@
+const axios = require('axios'); // REQUIRED IMPORT
+const { GoogleAuth } = require('google-auth-library');
+
+exports.handler = async (context, event, callback) => {
+  const twiml = new Twilio.twiml.MessagingResponse();
+  
+  try {
+    // 1. Load service account
+    const serviceAccount = JSON.parse(
+      Runtime.getAssets()["/service-account.json"].open()
+    );
+
+    // 2. Authenticate
+    const auth = new GoogleAuth({
+      credentials: serviceAccount,
+      scopes: ['https://www.googleapis.com/auth/cloud-platform']
+    });
+    const client = await auth.getClient();
+    const token = (await client.getAccessToken()).token;
+
+    // 3. Call Dialogflow (using axios)
+    const response = await axios.post(
+      `https://${serviceAccount.location || 'Global'}-dialogflow.googleapis.com/v2/projects/${serviceAccount.project_id}/agent/sessions/${event.From}:detectIntent`,
+      {
+        queryInput: {
+          text: {
+            text: event.Body,
+            languageCode: serviceAccount.language_code || 'en-US'
+          }
+        }
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${token}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 5000
+      }
+    );
+
+    twiml.message(response.data.queryResult.fulfillmentText);
+    
+  } catch (error) {
+    console.error("Error:", {
+      message: error.message,
+      stack: error.stack
+    });
+    twiml.message("Sorry, we're experiencing technical difficulties.");
+  }
+
+  callback(null, twiml);
+};
